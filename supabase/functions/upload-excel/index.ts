@@ -1,30 +1,64 @@
-// supabase/functions/upload-excel/index.ts
-// @ts-ignore: Deno import - works in Supabase Edge Functions
+import "https://deno.land/std@0.168.0/dotenv/load.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-// @ts-ignore: Deno-compatible xlsx lib
-import * as xlsx from "https://esm.sh/xlsx";
 
+const supabaseUrl = Deno.env.get("SUPABASE_URL");
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const functionSecret = Deno.env.get("FUNCTION_SECRET");
 
-serve(async (req: Request): Promise<Response> => {
+console.log("[TEST] SUPABASE_URL loaded:", !!supabaseUrl);
+console.log("[TEST] SERVICE_ROLE_KEY loaded:", !!serviceRoleKey);
+console.log("[TEST] FUNCTION_SECRET loaded:", !!functionSecret);
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "x-function-secret, content-type",
+};
+
+serve(async (req) => {
+  const received = req.headers.get("x-function-secret");
+  console.log("[TEST] Received x-function-secret:", received);
+
+  // Handle preflight CORS request
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  const isAuthorized = received === functionSecret;
+
+  if (!isAuthorized) {
+    return new Response(
+      JSON.stringify({
+        error: "Unauthorized",
+        expectedSecretStart: functionSecret?.slice(0, 6) + "...",
+        receivedSecret: received,
+      }),
+      {
+        status: 401,
+        headers: corsHeaders,
+      }
+    );
+  }
+
+  // Handle file upload
   const formData = await req.formData();
-  const file = formData.get("file") as File;
+  const file = formData.get("file");
 
-  if (!file) {
-    return new Response(JSON.stringify({ error: "No file uploaded" }), {
+  if (!file || !(file instanceof File)) {
+    return new Response(JSON.stringify({ error: "No file uploaded." }), {
       status: 400,
+      headers: corsHeaders,
     });
   }
 
-  const arrayBuffer = await file.arrayBuffer();
-  const workbook = xlsx.read(arrayBuffer, { type: "array" });
-
-  // Just example logic - replace with your own Excel processing
-  const sheetNames = workbook.SheetNames;
-  const sheetData = xlsx.utils.sheet_to_json(
-    workbook.Sheets[sheetNames[0]]
+  return new Response(
+    JSON.stringify({
+      message: "File received successfully!",
+      fileName: file.name,
+      size: file.size,
+    }),
+    {
+      status: 200,
+      headers: corsHeaders,
+    }
   );
-
-  return new Response(JSON.stringify({ sheetNames, data: sheetData }), {
-    headers: { "Content-Type": "application/json" },
-  });
 });

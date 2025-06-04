@@ -1,4 +1,3 @@
-// pages/index.tsx
 import { useState } from "react";
 
 export default function Home() {
@@ -16,24 +15,39 @@ export default function Home() {
       return;
     }
 
+    console.log("Sending function secret:", process.env.NEXT_PUBLIC_FUNCTION_SECRET);
+
     const formData = new FormData();
     formData.append("file", file);
 
-    // Example fetch call - replace URL with your Supabase Edge Function endpoint
     try {
       const res = await fetch(
-        "https://jioosrbwgchukicvocls.functions.supabase.co/upload-excel",
+        "https://jioosrbwgchukicvocls.supabase.co/functions/v1/upload-excel",
         {
           method: "POST",
+          headers: {
+            "x-function-secret": process.env.NEXT_PUBLIC_FUNCTION_SECRET || "",
+          },
           body: formData,
         }
       );
+
       const json = await res.json();
+
+      if (!res.ok) {
+        console.error("Server error:", json);
+        setResult(`Error: ${json.error || json.message || "Unknown error"}`);
+        return;
+      }
+
       setResult(JSON.stringify(json, null, 2));
     } catch (error) {
+      console.error("Fetch error:", error);
       setResult("Upload failed. Try again.");
     }
   };
+
+
 
   return (
     <main className="min-h-screen bg-black flex flex-col items-center justify-center p-6 text-white">
