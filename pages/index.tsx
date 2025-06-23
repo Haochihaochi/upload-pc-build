@@ -15,8 +15,6 @@ export default function Home() {
       return;
     }
 
-    console.log("Sending function secret:", process.env.NEXT_PUBLIC_FUNCTION_SECRET);
-
     const formData = new FormData();
     formData.append("file", file);
 
@@ -46,6 +44,7 @@ export default function Home() {
       setResult("Upload failed. Try again.");
     }
   };
+
 
 
 

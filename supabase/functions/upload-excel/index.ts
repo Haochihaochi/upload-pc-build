@@ -2,6 +2,14 @@ import "https://deno.land/std@0.168.0/dotenv/load.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
+import { extractProcessor } from "./extract/processor.ts";
+import { extractGpu } from "./extract/gpu.ts";
+import { extractRam } from "./extract/ram.ts";
+import { extractMobo } from "./extract/mobo.ts";
+import { extractStorage } from "./extract/storage.ts";
+import { extractPsu } from "./extract/psu.ts";
+import { extractCasing } from "./extract/casing.ts";
+import { extractCooler } from "./extract/cooler.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -40,67 +48,49 @@ serve(async (req) => {
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: "buffer", cellStyles: true });
 
-  const sheet = workbook.Sheets["PROCESSOR @ NUC"];
-  if (!sheet) {
-    return new Response(JSON.stringify({ error: "Sheet 'PROCESSOR @ NUC' not found." }), {
-      status: 400,
-      headers: corsHeaders,
-    });
-  }
+  const supportedSheets = [
+    { name: "PROCESSOR @ NUC", table: "processor", extractor: extractProcessor, truncateFn: "truncate_processor" },
+    { name: "VGA", table: "gpu", extractor: extractGpu, truncateFn: "truncate_gpu" },
+    { name: "RAM", table: "ram", extractor: extractRam, truncateFn: "truncate_ram" },
+    { name: "MOTHERBOARD", table: "motherboard", extractor: extractMobo, truncateFn: "truncate_motherboard" },
+    { name: "SSD & HDD", table: "storage", extractor: extractStorage, truncateFn: "truncate_storage" },
+    { name: "PSU", table: "psu", extractor: extractPsu, truncateFn: "truncate_psu" },
+    { name: "CASING", table: "casing", extractor: extractCasing, truncateFn: "truncate_casing" },
+    { name: "FAN", table: "cooler", extractor: extractCooler, truncateFn: "truncate_cooler" },
+  ];
 
-  const merges = sheet["!merges"] || [];
-  const rowsToInsert: { type: string; description: string; price: number }[] = [];
+  const results: any[] = [];
 
-  for (const merge of merges) {
-    const startCol = merge.s.c;
-    const startRow = merge.s.r;
-    const endRow = merge.e.r;
+  for (const { name, table, extractor, truncateFn } of supportedSheets) {
+    const sheet = workbook.Sheets[name];
+    if (!sheet) continue;
 
-    const typeCell = sheet[XLSX.utils.encode_cell({ r: startRow, c: startCol })];
-    const type = typeCell?.v?.toString().trim() ?? "";
-
-    for (let r = startRow; r <= endRow; r++) {
-      const desc = sheet[XLSX.utils.encode_cell({ r, c: startCol + 2 })]?.v?.toString().trim() ?? "";
-      const priceRaw = sheet[XLSX.utils.encode_cell({ r, c: startCol + 3 })]?.v?.toString().trim() ?? "";
-
-      if (!priceRaw || priceRaw.toUpperCase() === "NS") continue;
-
-      const cleanedPrice = priceRaw.replace(/[^0-9.]/g, "");
-      if (!cleanedPrice) continue;
-
-      const priceWithAdd = parseFloat(cleanedPrice) + 30;
-
-      rowsToInsert.push({
-        type,
-        description: desc,
-        price: priceWithAdd,
-      });
+    // Truncate table
+    const { error: truncateError } = await supabase.rpc(truncateFn);
+    if (truncateError) {
+      results.push({ table, status: "error", message: "Truncate failed", error: truncateError.message });
+      continue;
     }
-  }
 
-  // 🧹 Truncate the processor table to reset ID auto-increment
-  const { error: truncateError } = await supabase.rpc("truncate_processor");
-if (truncateError) {
-  return new Response(JSON.stringify({ error: "Failed to truncate table: " + truncateError.message }), {
-    status: 500,
-    headers: corsHeaders,
-  });
-}
+    // Extract data
+    const rowsToInsert = await extractor(sheet);
+    if (!rowsToInsert.length) {
+      results.push({ table, status: "warning", message: "No rows extracted" });
+      continue;
+    }
 
-  // 💾 Insert new rows
-  if (rowsToInsert.length > 0) {
-    const { error: insertError } = await supabase.from("processor").insert(rowsToInsert);
+    // Insert into Supabase
+    const { error: insertError } = await supabase.from(table).insert(rowsToInsert);
     if (insertError) {
-      return new Response(JSON.stringify({ error: "Insert failed: " + insertError.message }), {
-        status: 500,
-        headers: corsHeaders,
-      });
+      results.push({ table, status: "error", message: "Insert failed", error: insertError.message });
+    } else {
+      results.push({ table, status: "success", inserted: rowsToInsert.length });
     }
   }
 
   return new Response(JSON.stringify({
-    message: "Processor table reset and populated successfully.",
-    rowsInserted: rowsToInsert.length,
+    message: "Upload processed.",
+    results,
   }), {
     status: 200,
     headers: corsHeaders,
