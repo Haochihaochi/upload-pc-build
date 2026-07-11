@@ -4,6 +4,9 @@ import { parsePcPartsPayload } from "@/lib/pc-parts";
 
 type ApiResponse = Record<string, unknown>;
 
+const EDGE_FUNCTION_URL =
+  "https://jioosrbwgchukicvocls.supabase.co/functions/v1/upload-excel";
+
 export const config = {
   api: {
     bodyParser: {
@@ -21,16 +24,8 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const functionSecret = process.env.FUNCTION_SECRET;
-
-  if (!supabaseUrl || !functionSecret) {
-    console.error("SUPABASE_URL or FUNCTION_SECRET is not configured");
-    return res.status(500).json({ error: "Server is not configured" });
-  }
-
   const receivedSecret = req.headers["x-upload-secret"];
-  if (receivedSecret !== functionSecret) {
+  if (typeof receivedSecret !== "string" || !receivedSecret) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
@@ -40,17 +35,14 @@ export default async function handler(
   }
 
   try {
-    const response = await fetch(
-      `${supabaseUrl.replace(/\/$/, "")}/functions/v1/upload-excel`,
-      {
+    const response = await fetch(EDGE_FUNCTION_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-function-secret": functionSecret,
+          "x-function-secret": receivedSecret,
         },
         body: JSON.stringify({ tables }),
-      },
-    );
+      });
 
     const body = await response.text();
     let result: ApiResponse;
