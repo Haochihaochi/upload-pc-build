@@ -1,98 +1,128 @@
-import "https://deno.land/std@0.168.0/dotenv/load.ts";
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as XLSX from "https://esm.sh/xlsx@0.18.5";
-import { extractProcessor } from "./extract/processor.ts";
-import { extractGpu } from "./extract/gpu.ts";
-import { extractRam } from "./extract/ram.ts";
-import { extractMobo } from "./extract/mobo.ts";
-import { extractStorage } from "./extract/storage.ts";
-import { extractPsu } from "./extract/psu.ts";
-import { extractCasing } from "./extract/casing.ts";
-import { extractCooler } from "./extract/cooler.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const functionSecret = Deno.env.get("FUNCTION_SECRET");
 
-const supabase = createClient(supabaseUrl!, serviceRoleKey!);
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "x-function-secret, content-type",
+  "Content-Type": "application/json",
 };
 
-serve(async (req) => {
+const supportedTables = [
+  { table: "processor", truncateFn: "truncate_processor" },
+  { table: "gpu", truncateFn: "truncate_gpu" },
+  { table: "ram", truncateFn: "truncate_ram" },
+  { table: "motherboard", truncateFn: "truncate_motherboard" },
+  { table: "storage", truncateFn: "truncate_storage" },
+  { table: "psu", truncateFn: "truncate_psu" },
+  { table: "casing", truncateFn: "truncate_casing" },
+  { table: "cooler", truncateFn: "truncate_cooler" },
+] as const;
+
+type Row = { type: string; description: string; price: number };
+
+function isRow(value: unknown): value is Row {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+
+  return (
+    typeof row.type === "string" &&
+    typeof row.description === "string" &&
+    typeof row.price === "number" &&
+    Number.isFinite(row.price)
+  );
+}
+
+function jsonResponse(body: Record<string, unknown>, status: number) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: corsHeaders,
+  });
+}
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  if (req.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
   const received = req.headers.get("x-function-secret");
   if (received !== functionSecret) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: corsHeaders,
-    });
+    return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  const formData = await req.formData();
-  const file = formData.get("file");
-
-  if (!file || !(file instanceof File)) {
-    return new Response(JSON.stringify({ error: "No file uploaded." }), {
-      status: 400,
-      headers: corsHeaders,
-    });
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.error("Supabase environment variables are missing");
+    return jsonResponse({ error: "Server is not configured" }, 500);
   }
 
-  const arrayBuffer = await file.arrayBuffer();
-  const workbook = XLSX.read(arrayBuffer, { type: "buffer", cellStyles: true });
+  try {
+    const body = await req.json();
+    const tables = body?.tables;
 
-  const supportedSheets = [
-    { name: "PROCESSOR @ NUC", table: "processor", extractor: extractProcessor, truncateFn: "truncate_processor" },
-    { name: "VGA", table: "gpu", extractor: extractGpu, truncateFn: "truncate_gpu" },
-    { name: "RAM", table: "ram", extractor: extractRam, truncateFn: "truncate_ram" },
-    { name: "MOTHERBOARD", table: "motherboard", extractor: extractMobo, truncateFn: "truncate_motherboard" },
-    { name: "SSD & HDD", table: "storage", extractor: extractStorage, truncateFn: "truncate_storage" },
-    { name: "PSU", table: "psu", extractor: extractPsu, truncateFn: "truncate_psu" },
-    { name: "CASING", table: "casing", extractor: extractCasing, truncateFn: "truncate_casing" },
-    { name: "FAN", table: "cooler", extractor: extractCooler, truncateFn: "truncate_cooler" },
-  ];
-
-  const results: any[] = [];
-
-  for (const { name, table, extractor, truncateFn } of supportedSheets) {
-    const sheet = workbook.Sheets[name];
-    if (!sheet) continue;
-
-    // Truncate table
-    const { error: truncateError } = await supabase.rpc(truncateFn);
-    if (truncateError) {
-      results.push({ table, status: "error", message: "Truncate failed", error: truncateError.message });
-      continue;
+    if (!tables || typeof tables !== "object" || Array.isArray(tables)) {
+      return jsonResponse({ error: "Invalid or empty parts data" }, 400);
     }
 
-    // Extract data
-    const rowsToInsert = await extractor(sheet);
-    if (!rowsToInsert.length) {
-      results.push({ table, status: "warning", message: "No rows extracted" });
-      continue;
+    const validated = new Map<string, Row[]>();
+    for (const { table } of supportedTables) {
+      const rows = (tables as Record<string, unknown>)[table];
+      if (rows === undefined) continue;
+
+      if (!Array.isArray(rows) || rows.length > 5_000 || !rows.every(isRow)) {
+        return jsonResponse({ error: `Invalid rows for ${table}` }, 400);
+      }
+
+      if (rows.length) validated.set(table, rows);
     }
 
-    // Insert into Supabase
-    const { error: insertError } = await supabase.from(table).insert(rowsToInsert);
-    if (insertError) {
-      results.push({ table, status: "error", message: "Insert failed", error: insertError.message });
-    } else {
-      results.push({ table, status: "success", inserted: rowsToInsert.length });
+    if (!validated.size) {
+      return jsonResponse({ error: "No populated tables were provided" }, 400);
     }
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+    const results: Record<string, unknown>[] = [];
+
+    for (const { table, truncateFn } of supportedTables) {
+      const rows = validated.get(table);
+      if (!rows) continue;
+
+      const { error: truncateError } = await supabase.rpc(truncateFn);
+      if (truncateError) {
+        results.push({
+          table,
+          status: "error",
+          message: "Truncate failed",
+          error: truncateError.message,
+        });
+        continue;
+      }
+
+      const { error: insertError } = await supabase.from(table).insert(rows);
+      if (insertError) {
+        results.push({
+          table,
+          status: "error",
+          message: "Insert failed",
+          error: insertError.message,
+        });
+      } else {
+        results.push({ table, status: "success", inserted: rows.length });
+      }
+    }
+
+    const hasErrors = results.some((result) => result.status === "error");
+    return jsonResponse(
+      { message: "Upload processed.", results },
+      hasErrors ? 500 : 200,
+    );
+  } catch (error) {
+    console.error("Upload processing failed", error);
+    return jsonResponse({ error: "Invalid JSON request" }, 400);
   }
-
-  return new Response(JSON.stringify({
-    message: "Upload processed.",
-    results,
-  }), {
-    status: 200,
-    headers: corsHeaders,
-  });
 });

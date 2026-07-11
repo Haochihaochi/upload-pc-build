@@ -2,6 +2,17 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Create `.env.local` before starting the app:
+
+```bash
+SUPABASE_URL=https://jioosrbwgchukicvocls.supabase.co
+FUNCTION_SECRET=replace-with-the-same-secret-used-by-the-edge-function
+```
+
+`FUNCTION_SECRET` must remain server-only. Do not prefix it with
+`NEXT_PUBLIC_`. The upload page asks for the secret at runtime and the Pages API
+route verifies it before forwarding normalized JSON to the Edge Function.
+
 First, run the development server:
 
 ```bash
@@ -38,3 +49,16 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+
+## Deploying the upload fix
+
+The frontend and Edge Function must be deployed together because the function
+now accepts normalized JSON instead of a multipart Excel file.
+
+```bash
+supabase functions deploy upload-excel --project-ref jioosrbwgchukicvocls --no-verify-jwt
+```
+
+Add `SUPABASE_URL` and `FUNCTION_SECRET` to the Vercel project environment, then
+deploy the Next.js application. The browser parses the workbook without cell
+styles, while Supabase only validates rows and performs database writes.
