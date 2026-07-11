@@ -5,14 +5,11 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 Create `.env.local` before starting the app:
 
 ```bash
-SUPABASE_URL=https://jioosrbwgchukicvocls.supabase.co
-FUNCTION_SECRET=replace-with-the-same-secret-used-by-the-edge-function
 NEXT_PUBLIC_FUNCTION_SECRET=replace-with-the-same-secret-used-by-the-edge-function
 ```
 
-The upload page sends `NEXT_PUBLIC_FUNCTION_SECRET` to the Pages API route. The
-route verifies it against the server-side `FUNCTION_SECRET` before forwarding
-normalized JSON to the Edge Function.
+The upload page sends `NEXT_PUBLIC_FUNCTION_SECRET` through the Pages API route.
+The Supabase Edge Function validates it against its existing `FUNCTION_SECRET`.
 
 First, run the development server:
 
@@ -60,7 +57,6 @@ now accepts normalized JSON instead of a multipart Excel file.
 supabase functions deploy upload-excel --project-ref jioosrbwgchukicvocls --no-verify-jwt
 ```
 
-Add `SUPABASE_URL`, `FUNCTION_SECRET`, and `NEXT_PUBLIC_FUNCTION_SECRET` to the
-Vercel project environment, then deploy the Next.js application. The browser
-parses the workbook without cell styles, while Supabase only validates rows and
-performs database writes.
+Add `NEXT_PUBLIC_FUNCTION_SECRET` to the Vercel project environment, then deploy
+the Next.js application. The browser parses the workbook without cell styles,
+while Supabase only validates rows and performs database writes.
