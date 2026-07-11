@@ -7,11 +7,12 @@ Create `.env.local` before starting the app:
 ```bash
 SUPABASE_URL=https://jioosrbwgchukicvocls.supabase.co
 FUNCTION_SECRET=replace-with-the-same-secret-used-by-the-edge-function
+NEXT_PUBLIC_FUNCTION_SECRET=replace-with-the-same-secret-used-by-the-edge-function
 ```
 
-`FUNCTION_SECRET` must remain server-only. Do not prefix it with
-`NEXT_PUBLIC_`. The upload page asks for the secret at runtime and the Pages API
-route verifies it before forwarding normalized JSON to the Edge Function.
+The upload page sends `NEXT_PUBLIC_FUNCTION_SECRET` to the Pages API route. The
+route verifies it against the server-side `FUNCTION_SECRET` before forwarding
+normalized JSON to the Edge Function.
 
 First, run the development server:
 
@@ -59,6 +60,7 @@ now accepts normalized JSON instead of a multipart Excel file.
 supabase functions deploy upload-excel --project-ref jioosrbwgchukicvocls --no-verify-jwt
 ```
 
-Add `SUPABASE_URL` and `FUNCTION_SECRET` to the Vercel project environment, then
-deploy the Next.js application. The browser parses the workbook without cell
-styles, while Supabase only validates rows and performs database writes.
+Add `SUPABASE_URL`, `FUNCTION_SECRET`, and `NEXT_PUBLIC_FUNCTION_SECRET` to the
+Vercel project environment, then deploy the Next.js application. The browser
+parses the workbook without cell styles, while Supabase only validates rows and
+performs database writes.
