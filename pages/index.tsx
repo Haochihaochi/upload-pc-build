@@ -6,7 +6,6 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
-  const [secret, setSecret] = useState("");
   const [result, setResult] = useState<string>("");
   const [isUploading, setIsUploading] = useState(false);
 
@@ -18,11 +17,6 @@ export default function Home() {
   const handleSubmit = async () => {
     if (!file) {
       setResult("Error: Please select an Excel file first.");
-      return;
-    }
-
-    if (!secret) {
-      setResult("Error: Please enter the upload secret.");
       return;
     }
 
@@ -50,7 +44,7 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-upload-secret": secret,
+          "x-upload-secret": process.env.NEXT_PUBLIC_FUNCTION_SECRET || "",
         },
         body: JSON.stringify({ tables }),
       });
@@ -85,15 +79,6 @@ export default function Home() {
           file:bg-gray-700 file:text-white
           hover:file:bg-gray-600
           cursor-pointer"
-      />
-
-      <input
-        type="password"
-        value={secret}
-        onChange={(event) => setSecret(event.target.value)}
-        placeholder="Upload secret"
-        autoComplete="off"
-        className="mb-6 w-full max-w-sm rounded-md border border-gray-700 bg-gray-900 px-4 py-2 text-white placeholder:text-gray-500"
       />
 
       <button
